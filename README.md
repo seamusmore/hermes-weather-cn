@@ -11,10 +11,20 @@
 
 ## Installation
 
+### Recommended (via Hermes CLI)
+
 ```bash
-hermes plugins install https://github.com/seamusmore/hermes-weather-cn.git
-# 或者手动 clone：
-# git clone https://github.com/seamusmore/hermes-weather-cn.git ~/.hermes/plugins/weather-cn
+hermes skills install https://github.com/seamusmore/hermes-weather-cn.git
+```
+
+Then restart the gateway for the skill to take effect.
+
+### Manual (alternative)
+
+```bash
+# Clone into Hermes skills directory
+git clone https://github.com/seamusmore/hermes-weather-cn.git \
+  ~/.hermes/skills/openclaw-imports/weather-cn
 ```
 
 ## Configuration
