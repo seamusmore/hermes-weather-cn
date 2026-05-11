@@ -1,7 +1,7 @@
 ---
 name: weather-cn
 description: 中国天气查询（国内访问速度快）
-author: 谢宏 & 露娜
+author: Luna
 version: 1.0.0
 triggers:
   - "天气"
@@ -19,14 +19,17 @@ triggers:
 ### 推荐（via Hermes CLI）
 
 ```bash
-hermes plugins install https://github.com/seamusmore/hermes-weather-cn.git
+hermes skills install https://github.com/seamusmore/hermes-weather-cn.git
 ```
+
+Then restart the gateway for the skill to take effect.
 
 ### 手动
 
 ```bash
+# Clone into Hermes skills directory
 git clone https://github.com/seamusmore/hermes-weather-cn.git \
-  ~/.hermes/plugins/weather-cn
+  ~/.hermes/skills/openclaw-imports/weather-cn
 ```
 
 ## Configuration
