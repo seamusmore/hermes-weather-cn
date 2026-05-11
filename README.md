@@ -24,7 +24,7 @@ Then restart the gateway for the skill to take effect.
 ```bash
 # Clone into Hermes skills directory
 git clone https://github.com/seamusmore/hermes-weather-cn.git \
-  ~/.hermes/skills/openclaw-imports/weather-cn
+  ~/.hermes/skills/weather-cn
 ```
 
 ## Configuration
