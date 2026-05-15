@@ -7,11 +7,13 @@
 支持：实时天气、天预报、空气质量、天气指数
 
 用法：
-    python3 weather_cn.py <城市> [上级行政区]
+    python3 weather_cn.py --name 城市 [--adm 上级行政区]
+    python3 weather_cn.py --lat <lat> --lon <lon> [--name city_name]
     
 示例：
-    python3 weather_cn.py 成都
-    python3 weather_cn.py 成都 四川
+    python3 weather_cn.py --name 成都
+    python3 weather_cn.py --name 成都 --adm 四川
+    python3 weather_cn.py --lat 30.55 --lon 104.10
 """
 
 import json
@@ -103,35 +105,25 @@ def get_api_key_cached():
 # ==================== 功能区 ====================
 
 def get_city_info(city_name, adm=""):
-    """获取城市信息（支持命令行传入城市名称或 ID，默认成都高新区）"""
-    # 从本地缓存文件读取城市映射
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    cache_path = os.path.join(script_dir, "../city_cache.json")
-    city_map = {}
-    
-    if os.path.exists(cache_path):
-        try:
-            with open(cache_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                city_map = data.get("cities", {})
-        except:
-            pass
-    
-    # 查找缓存映射表
-    city_info = city_map.get(f"{adm}-{city_name}")
-    if city_info:
-        return city_info
-    
-    # 如果没查到缓存，则调用 GeoAPI 查询
+    """获取城市信息（直接调用 GeoAPI，无本地缓存）"""
     city_info = fetch_city_coordinates(city_name, adm=adm)
+    
+    # Fallback: 区/县级名称导致 GeoAPI 返回 400 时，尝试向上级城市 fallback
+    if not city_info:
+        district_suffixes = ('区', '县', '镇', '乡', '街道', '开发区', '高新区', '新区')
+        stripped = city_name
+        for suffix in district_suffixes:
+            if stripped.endswith(suffix):
+                stripped = stripped[:-len(suffix)]
+                break
+        if stripped and stripped != city_name:
+            city_info = fetch_city_coordinates(stripped, adm=adm)
+        if not city_info and adm:
+            city_info = fetch_city_coordinates(adm)
+    
     if not city_info:
         print(f"查询城市信息失败")
         return None
-
-    # 保存到本地缓存文件
-    city_map[f"{adm}-{city_name}"] = city_info
-    with open(cache_path, 'w', encoding='utf-8') as f:
-        json.dump({"cities": city_map}, f, ensure_ascii=False, indent=4)
     
     return city_info
 
@@ -230,25 +222,68 @@ def fetch_indices(location_id):
     return fetch_api("v7/indices", pathParams=f"1d", queryParams=f"type=0&location={location_id}")
 
 
+def parse_args():
+    """解析命令行参数，支持城市名或经纬度两种模式"""
+    args = sys.argv[1:]
+    
+    # 模式1: 经纬度模式 --lat 30.55 --lon 104.10 --name 成都高新区
+    lat = None
+    lon = None
+    name = "成都"
+    adm = ""
+    
+    i = 0
+    while i < len(args):
+        if args[i] in ("--lat", "-lat") and i + 1 < len(args):
+            lat = args[i + 1]
+            i += 2
+        elif args[i] in ("--lon", "-lon") and i + 1 < len(args):
+            lon = args[i + 1]
+            i += 2
+        elif args[i] in ("--name", "-name") and i + 1 < len(args):
+            name = args[i + 1]
+            i += 2
+        elif args[i] in ("--adm", "-adm") and i + 1 < len(args):
+            adm = args[i + 1]
+            i += 2
+        else:
+            # 剩余的作为位置参数（城市名+上级行政区）
+            if not lat and not lon:
+                if i == 0:
+                    name = args[i]
+                elif i == 1:
+                    adm = args[i]
+            i += 1
+    
+    return {"lat": lat, "lon": lon, "name": name, "adm": adm}
+
 def main():
     """主函数"""
-
-    # 从命令行获取city和adm参数
-    if len(sys.argv) < 2:
-        print("用法: python script.py <city_name> [adm]")
-        sys.exit(1)
+    args = parse_args()
+    lat = args.get("lat")
+    lon = args.get("lon")
+    city_name = args.get("name")
+    adm = args.get("adm", "")
     
-    city_name = sys.argv[1]
-    adm = sys.argv[2] if len(sys.argv) > 2 else ""
-
-    # 获取城市信息（city_id, city_name）
-    city_info = get_city_info(city_name, adm)
-    if not city_info:
-        print(f"未找到城市:{city_name}, {adm}")
-        return
-    
-    location_id = city_info.get("id")
-    latitude, longitude = city_info.get("lat"), city_info.get("lon")
+    if lat and lon:
+        # 模式1: 经纬度直查（和风天气 API 支持 location=lon,lat 格式）
+        location_id = f"{lon},{lat}"
+        latitude, longitude = lat, lon
+    else:
+        # 模式2: 城市名查询
+        if not city_name:
+            print("用法:\n"
+                  " 按城市: python weather_cn.py --name 城市 [--adm 上级行政区]\n"
+                  " 按坐标: python weather_cn.py --lat 30.55 --lon 104.10 [--name 位置名称]")
+            sys.exit(1)
+        
+        city_info = get_city_info(city_name, adm)
+        if not city_info:
+            print(f"未找到城市:{city_name}, {adm}")
+            return
+        
+        location_id = city_info.get("id")
+        latitude, longitude = city_info.get("lat"), city_info.get("lon")
     
     # 获取所有数据
     now_data = fetch_weather_now(location_id)

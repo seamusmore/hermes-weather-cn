@@ -47,15 +47,27 @@ QWEATHER_API_KEY=your_api_key
 
 本 skill 包含可执行脚本 `weather_cn.py`，位于 `scripts/` 子目录下：
 
-**指定城市（传入城市名称和上级行政区名称）**：
+**按城市名称查询**：
 ```bash
 # 按城市名称查询（从本地缓存读取城市 ID）
-python3 {baseDir}/scripts/weather_cn.py 北京
+python3 {baseDir}/scripts/weather_cn.py --name 成都
 
 # 按城市名称+上级行政区名称查询（避免城市重名）
-python3 {baseDir}/scripts/weather_cn.py 高新区 成都
-python3 {baseDir}/scripts/weather_cn.py 成都 四川
+python3 {baseDir}/scripts/weather_cn.py --name 成都 --adm 四川
 ```
+
+**按经纬度查询**（推荐，精确到小区/POI）：
+```bash
+python3 {baseDir}/scripts/weather_cn.py --lat 30.67 --lon 104.20
+```
+
+经纬度模式说明：
+- `--lat`: 纬度，十进制，北纬为正
+- `--lon`: 经度，十进制，东经为正
+- `--name`: 显示名（可选）
+- 坐标系：和风天气中国大陆地区使用 **GCJ-02**（国测局加密坐标），与高德/腾讯地图一致，与百度地图（BD-09）不兼容
+- 经纬度模式跷过 GeoAPI 查询，直接用坐标调用天气/空气质量/指数 API，速度更快、精度更高
+> ⚠️ **只能传城市名，不能传区/县级名称**。`高新区`、`朝阳区`、`海淀区` 等区名不是有效城市，GeoAPI 会返回 400。
 
 **AQI 等级说明**：
 | AQI | 等级 | 建议 |
@@ -99,9 +111,20 @@ python3 {baseDir}/scripts/weather_cn.py 成都 四川
 
 ## Pitfalls
 
-- **Security scan blocks script execution**: In headless or cron environments, running `python3 weather_cn.py` triggers a security scan (`tirith:unknown`) and blocks with `approval_required`. Direct `curl` calls to the API endpoint are also blocked.
-  - *Symptom*: `exit_code: -1`, `status: approval_required`, `pattern_key: tirith:unknown`.
-  - *Do not retry or attempt the script in unattended mode* — approval cannot be obtained. Proceed immediately to the Fallback Workflow.
+- **District/区级名称会导致脚本失败** (2026-05-15 确认)
+  
+  QWeather GeoAPI 只支持城市级查询，不支持区、县等二级行政区。传入区名会返回 400：
+  ```
+  HTTP Error 400: fetch_city_coordinates 失败
+  未找到城市:高新区, 成都
+  ```
+  
+  *影响*：AI 看到脚本失败后会转入 fallback workflow，通过 `web_search` + `web_extract` 手动抓取多个网页补充数据，导致 cron job 执行时间从几十秒拖延到 10+ 分钟。
+
+- **Fallback Workflow is VERY SLOW in cron jobs** (2026-05-15 confirmed): Gathering all requested data (current conditions + 3-day forecast + AQI + 6+ life indices) via `web_search` + `web_extract` requires 15–18 tool calls and can take 10–15 minutes. In a cron job scheduled for 07:10, this means the message may not deliver until 07:22+, leading users to believe the task "died" or "didn't send."
+  - *Root cause*: The fast script path failed (usually due to a district-level city name like `高新区 成都` being passed to the GeoAPI), forcing the agent into the slow fallback.
+  - *Measured example*: 5/14 weather cron — 18 web_search/web_extract calls, ~12 min execution.
+  - *Mitigation*: Ensure the cron prompt specifies a **city-level name only** (e.g., "成都" not "成都高新区"). If the script path works, the job finishes in under 30 seconds.
 
 ## Fallback Workflow (Unattended / Cron Mode)
 
@@ -112,15 +135,28 @@ When the script or curl is blocked by security policy, use `web_search` + `web_e
    - Extract: current temp range, weather phenomenon, humidity, wind, and 3-day forecast highs/lows.
    - *City codes*: 成都 is `101270101`; 绵阳 is `101270401`.
 
-2. **Real-time AQI / PM2.5**:
+2. **Hourly detailed forecast (temperature, humidity, wind, precipitation, pressure)**:
+   - `https://weather.cma.cn/web/weather/S1003.html` — China Meteorological Administration official hourly forecast for Chengdu. Provides granular 3-hourly data: temp, precipitation, wind speed/direction, pressure, humidity, cloud cover. Essential for precise "what will it be at 8:00" departure advice.
+   - *Station codes*: 成都 is `S1003` (CMA station ID, distinct from weather.com.cn city codes).
+
+3. **Real-time AQI / PM2.5**:
    - `https://www.air-level.com/air/chengdu/` — clean tables for AQI, PM2.5, PM10, station breakdown.
    - `https://aqicn.org/city/chengdu/cn/` — US EPA AQI standard with hourly history.
    - Search: `成都 AQI PM2.5 实时` to cross-check.
 
-3. **Detailed life indices (穿衣/洗车/紫外线/感冒/运动/旅游/过敏/钓鱼)**:
+4. **Detailed life indices (穿衣/洗车/紫外线/感冒/运动/旅游/过敏/钓鱼)**:
    - `https://www.qweather.com/indices/chengdu-101270101.html` — structured daily indices for ~7 days.
+## 修复方案
 
-4. **Compile report** using the canonical template below. Determine if extreme weather exists (暴雨, 暴雪, 台风, 雾霾, <0°C or >35°C). Provide contextual 出门建议 based on the user's wake-up and departure times.
+1. **cron prompt 修改**：把"成都高新区"改成"成都"。全市数据对高新区足够准确。
+2. **skill 脚本增加 fallback**：在 `get_city_info` 中添加区名 fallback 逻辑——当传入"高新区"等区名失败时，自动提取上级城市（如"成都"）进行查询。
+3. **curator 重组后测试**：每次 curator 打包 skill 后，立即测试一次 cron job，确认脚本路径正常。
+
+**2026-05-15 更新**：脚本已修复，支持区名 fallback。传入"高新区 成都"时会自动试探"成都"。
+
+## References
+
+- `references/data-sources.md` — Catalog of validated public weather data sources, city codes, station IDs, reliability notes, and known failing sources.
 
 ### Canonical Report Template
 

@@ -44,11 +44,13 @@ QWEATHER_API_KEY=your_api_key
 
 ```bash
 # 查询城市天气
-python3 scripts/weather_cn.py 成都
+python3 scripts/weather_cn.py --name 成都
 
 # 指定上级行政区（避免重名）
-python3 scripts/weather_cn.py 高新区 成都
-python3 scripts/weather_cn.py 成都 四川
+python3 scripts/weather_cn.py --name 海淀区 -adm 北京市
+python3 scripts/weather_cn.py --name 成都 -adm 四川
+
+python3 scripts/weather_cn.py --lat 30.55 --lon 104.10
 ```
 
 ### Hermes 技能调用
