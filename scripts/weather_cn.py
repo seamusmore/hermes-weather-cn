@@ -27,12 +27,16 @@ from datetime import datetime
 # ==================== 工具函数 ====================
 
 def load_config():
-    """从.env 文件加载配置，优先 ~/.hermes/.env，fallback 到本地 .env"""
+    """从.env 文件加载配置，优先 HERMES_HOME/.env，其次 ~/.hermes/.env，fallback 到本地 .env"""
     config = {}
-    
-    # 1. 优先读取 ~/.hermes/.env
-    hermes_env = os.path.expanduser("~/.hermes/.env")
-    for path in [hermes_env]:
+
+    # 1. 优先读 HERMES_HOME/.env（Hermes 自定义部署路径），其次 ~/.hermes/.env
+    env_paths = []
+    hermes_home = os.environ.get("HERMES_HOME")
+    if hermes_home:
+        env_paths.append(os.path.join(hermes_home, ".env"))
+    env_paths.append(os.path.expanduser("~/.hermes/.env"))
+    for path in env_paths:
         if os.path.exists(path):
             try:
                 with open(path, 'r', encoding='utf-8') as f:
